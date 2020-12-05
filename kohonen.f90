@@ -4,14 +4,17 @@ module kohonen_module
 !  integer, parameter
 !    imax = 8, jmax = 8, kmax = 10, lmax = 10, tmax = 2192, pmax = 5.0 * tmax
 !  real, parameter :: sigma0 = 5.66, tau0 = 0.25
+  real, parameter :: tau00 = 0.25
 
   integer, private :: imax, jmax, kmax, lmax
   real, private :: tmax, pmax, sigma0, tau0, nmax
   integer, private :: p = 1
-  real, dimension(:, :), allocatable, private :: drms
-  real, dimension(:, :, :, :), allocatable, private :: delta, weight
+  real, dimension(:), allocatable, private :: x, y
+  real, dimension(:, :, :, :), allocatable, private :: delta
   integer, dimension(2), private :: ns
 
+  real, dimension(:, :), allocatable, public :: kohonen_drms
+  real, dimension(:, :, :, :), allocatable, public :: kohonen_weight
   logical, public :: kohonen_debug = .false.
 
   public :: kohonen_Init, kohonen_Learn
@@ -34,17 +37,18 @@ contains
   subroutine Normalize_weight()
     real :: wmean, wsdev
 
-    wmean = sum( weight(:, :, :, :) ) / nmax
-    wsdev = sqrt( (sum( weight(:, :, :, :)**2 ) - nmax * wmean **2) / (nmax - 1.0) )
-    weight = (weight(:, :, :, :) - wmean) / wsdev
+    wmean = sum( kohonen_weight(:, :, :, :) ) / nmax
+    wsdev = sqrt( (sum( kohonen_weight(:, :, :, :) ** 2 ) &
+      - nmax * wmean **2) / (nmax - 1.0) )
+    kohonen_weight = (kohonen_weight(:, :, :, :) - wmean) / wsdev
 
   end subroutine Normalize_weight
 
 
-  subroutine kohonen_Init(kx, lx, ix, jx, tx, px, s0, t0)
-
+  subroutine kohonen_Init(kx, lx, ix, jx, tx, px, s0, t0, lhex)
     integer, intent(in) :: kx, lx, ix, jx, tx, px
-    real, intent(in) :: s0, t0
+    real, intent(in), optional :: s0, t0
+    logical, intent(in), optional :: lhex
 
     integer :: i, j, ii, jj
 
@@ -53,22 +57,69 @@ contains
     imax = ix; jmax = jx
     tmax = tx; pmax = px
     nmax = imax * jmax * kmax * lmax
-    sigma0 = s0; tau0 = t0
-    allocate( &
+    if ( kohonen_debug ) then
+      print *, "kmax =", kmax, "lmax =", lmax, &
+        "imax =", imax, " jmax = ", jmax, &
+        "tmax =", tmax, " pmax = ", pmax
+    end if
+    allocate( x(imax), y(jmax), &
       delta(imax, jmax, imax, jmax), &
-      weight(kmax, lmax, imax, jmax), &
-      drms(imax, jmax))
+      kohonen_weight(kmax, lmax, imax, jmax), &
+      kohonen_drms(imax, jmax))
 
-    ! Initialize weight with small random numbers
-    call random_number(weight)
-    call Normalize_weight()
+    ! Initialize kohonen_weight with small random numbers
+    call random_number(kohonen_weight)
+    call Normalize_kohonen_weight()
+
+    ! rectangular unit layout
+    do i = 1, imax 
+      x(i) = real(i) - 1.0
+    end do
+    do j = 1, jmax 
+      y(j) = real(j) - 1.0
+    end do
+    ! hexagonal unit layout
+    if (present(lhex)) then
+      if ( lhex ) then
+        do i = 1, imax, 2 
+          x(i) = x(i) + 0.5
+        end do
+        do j = 1, jmax 
+          y(j) = y(j) * 0.5 * sqrt(3.0)
+        end do
+      end if
+      if ( kohonen_debug ) then
+        print *, "hexagonal layout"
+      end if
+    else
+      print *, "rectangular layout"
+    end if
+    if ( kohonen_debug ) then
+      print *, "x =", x
+      print *, "y =", y
+    end if
+
+    if (present(s0)) then
+      sigma0 = s0
+    else
+      ! half the diagonal of the domain
+      sigma0 = 0.5 * sqrt( (maxval(x) - minval(x))**2 + (maxval(y) - minval(y)) ** 2)
+    end if
+    if (present(t0)) then
+      tau0 = t0
+    else
+      tau0 = tau00
+    end if
+    if ( kohonen_debug ) then
+      print *, "sigma0 =", sigma0, " tau0 =", tau0
+    end if
 
     ! Calculate delta as Cartesian distance between units
     do jj = 1, jmax
       do ii = 1, imax
         do j = 1, jmax
           do i = 1, imax
-            delta(i, j, ii, jj) = sqrt(real( (i - ii) ** 2 + (j - jj) ** 2 ))
+            delta(i, j, ii, jj) = sqrt( (x(i) - x(ii)) ** 2 + (y(j) - y(jj)) ** 2 )
           end do
         end do
       end do
@@ -78,7 +129,6 @@ contains
 
 
   subroutine kohonen_Learn( z, dp )
-
     real, dimension(:, :), intent(in) :: z
     real, intent(out) :: dp
 
@@ -88,19 +138,19 @@ contains
     ! Elect unit
     do j = 1, jmax
       do i = 1, imax
-        drms(i, j) = sqrt( sum( (weight(:, :, i, j) - z(:, :))**2 ) )
+        kohonen_drms(i, j) = sqrt( sum( (kohonen_weight(:, :, i, j) - z(:, :))**2 ) )
       end do
     end do
-    dp = minval(drms)
-    ns = minloc(drms)
+    dp = minval(kohonen_drms)
+    ns = minloc(kohonen_drms)
 
-    ! Adjust weight 
+    ! Adjust kohonen_weight 
     call Calc_sigma_tau( p, sigma, tau )
     do j = 1, jmax
       do i = 1, imax
         if ( delta(i, j, ns(1), ns(2)) <= sigma ) then
-          weight(i, j, :, :) = weight(i, j, :, :) + &
-            tau * (z(:, :) - weight(:, :, i, j))
+          kohonen_weight(i, j, :, :) = kohonen_weight(i, j, :, :) + &
+            tau * (z(:, :) - kohonen_weight(:, :, i, j))
         end if
       end do
     end do
