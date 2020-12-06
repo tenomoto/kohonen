@@ -69,7 +69,7 @@ contains
 
     ! Initialize kohonen_weight with small random numbers
     call random_number(kohonen_weight)
-    call Normalize_kohonen_weight()
+    call Normalize_weight()
 
     ! rectangular unit layout
     do i = 1, imax 
