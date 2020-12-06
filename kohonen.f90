@@ -9,7 +9,8 @@ module kohonen_module
   integer, private :: imax, jmax, kmax, lmax, tmax, pmax
   real, private :: sigma0, tau0
   integer, private :: p = 1
-  real, dimension(:), allocatable, private :: x, y
+  real, dimension(:), allocatable, private ::  y
+  real, dimension(:, :), allocatable, private :: x
   real, dimension(:, :, :, :), allocatable, private :: delta
   integer, dimension(2), private :: ns
 
@@ -54,6 +55,7 @@ contains
     logical, intent(in), optional :: lhex
 
     integer :: i, j, ii, jj
+    logical :: lhexagonal = .true.
 
     ! Initialize parameters and allocate arrays
     kmax = kx; lmax = lx
@@ -64,7 +66,7 @@ contains
         "imax =", imax, " jmax = ", jmax, &
         "tmax =", tmax, " pmax = ", pmax
     end if
-    allocate( x(imax), y(jmax), &
+    allocate( x(imax, jmax), y(jmax), &
       delta(imax, jmax, imax, jmax), &
       kohonen_weight(kmax, lmax, imax, jmax), &
       kohonen_drms(imax, jmax))
@@ -73,39 +75,41 @@ contains
     call random_number(kohonen_weight)
     call Normalize_weight()
 
+    if (present(lhex)) then
+      lhexagonal = lhex
+    end if
     ! rectangular unit layout
-    do i = 1, imax 
-      x(i) = real(i) - 1.0
-    end do
     do j = 1, jmax 
+      do i = 1, imax 
+        x(i, j) = real(i) - 1.0
+      end do
       y(j) = real(j) - 1.0
     end do
-    ! hexagonal unit layout
-    if (present(lhex)) then
-      if ( lhex ) then
-        do i = 1, imax, 2 
-          x(i) = x(i) + 0.5
-        end do
-        do j = 1, jmax 
-          y(j) = y(j) * 0.5 * sqrt(3.0)
-        end do
-      end if
-      if ( kohonen_debug ) then
-        print *, "hexagonal layout"
-      end if
-    else
-      print *, "rectangular layout"
+    if ( lhexagonal ) then
+      ! shift right for odd columns
+      x(:, 1::2) = x(:, 1::2) + 0.5
+      ! height of equilateral triangle
+      y(:) = y(:) * 0.5 * sqrt(3.0)
     end if
     if ( kohonen_debug ) then
-      print *, "x =", x
-      print *, "y =", y
+      do j = 1, jmax
+        print *, "x =", x(:, j), " y = ", y(j)
+      end do
+    end if
+    if ( kohonen_debug ) then
+      if ( lhexagonal ) then
+        print *, "hexagonal layout"
+      else
+        print *, "rectangular layout"
+      end if
     end if
 
     if (present(s0)) then
       sigma0 = s0
     else
       ! half the diagonal of the domain
-      sigma0 = 0.5 * sqrt( (maxval(x) - minval(x))**2 + (maxval(y) - minval(y)) ** 2)
+      print *, maxval(x), maxval(y)
+      sigma0 = 0.5 * sqrt( maxval(x) ** 2 + maxval(y) ** 2)
     end if
     if (present(t0)) then
       tau0 = t0
@@ -121,7 +125,7 @@ contains
       do ii = 1, imax
         do j = 1, jmax
           do i = 1, imax
-            delta(i, j, ii, jj) = sqrt( (x(i) - x(ii)) ** 2 + (y(j) - y(jj)) ** 2 )
+            delta(i, j, ii, jj) = sqrt( (x(i, j) - x(ii, jj)) ** 2 + (y(j) - y(jj)) ** 2 )
           end do
         end do
       end do
