@@ -134,9 +134,9 @@ contains
   end subroutine kohonen_Init
 
 
-  subroutine kohonen_Learn( z, dp )
+  subroutine kohonen_Learn( z, d_p )
     real, dimension(:, :), intent(in) :: z
-    real, intent(out) :: dp
+    real, intent(out) :: d_p
 
     integer :: i, j
     real :: sigma, tau
@@ -147,7 +147,7 @@ contains
         kohonen_drms(i, j) = sqrt( sum( (kohonen_weight(:, :, i, j) - z(:, :))**2 ) )
       end do
     end do
-    dp = minval(kohonen_drms)
+    d_p = minval(kohonen_drms)
     ns = minloc(kohonen_drms)
 
     ! Adjust kohonen_weight 
