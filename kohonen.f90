@@ -6,8 +6,8 @@ module kohonen_module
 !  real, parameter :: sigma0 = 5.66, tau0 = 0.25
   real, parameter :: tau00 = 0.25
 
-  integer, private :: imax, jmax, kmax, lmax
-  real, private :: tmax, pmax, sigma0, tau0, nmax
+  integer, private :: imax, jmax, kmax, lmax, tmax, pmax
+  real, private :: sigma0, tau0
   integer, private :: p = 1
   real, dimension(:), allocatable, private :: x, y
   real, dimension(:, :, :, :), allocatable, private :: delta
@@ -35,8 +35,11 @@ contains
 
 
   subroutine Normalize_weight()
-    real :: wmean, wsdev
 
+    real :: wmean, wsdev
+    integer :: nmax
+
+    nmax = size( kohonen_weight )
     wmean = sum( kohonen_weight(:, :, :, :) ) / nmax
     wsdev = sqrt( (sum( kohonen_weight(:, :, :, :) ** 2 ) &
       - nmax * wmean **2) / (nmax - 1.0) )
@@ -56,7 +59,6 @@ contains
     kmax = kx; lmax = lx
     imax = ix; jmax = jx
     tmax = tx; pmax = px
-    nmax = imax * jmax * kmax * lmax
     if ( kohonen_debug ) then
       print *, "kmax =", kmax, "lmax =", lmax, &
         "imax =", imax, " jmax = ", jmax, &
