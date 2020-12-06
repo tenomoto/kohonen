@@ -9,8 +9,6 @@ module kohonen_module
   integer, private :: imax, jmax, kmax, lmax, tmax, pmax
   real, private :: sigma0, tau0
   integer, private :: p = 1
-  real, dimension(:), allocatable, private ::  y
-  real, dimension(:, :), allocatable, private :: x
   real, dimension(:, :, :, :), allocatable, private :: delta
   integer, dimension(2), private :: ns
 
@@ -18,42 +16,36 @@ module kohonen_module
   real, dimension(:, :, :, :), allocatable, public :: kohonen_weight
   logical, public :: kohonen_debug = .false.
 
-  public :: kohonen_Init, kohonen_Learn
+  public :: kohonen_Init, kohonen_Normalize, kohonen_Learn
+
 
 contains
   
-  subroutine Calc_sigma_tau( p, sigma, tau )
-    integer, intent(in) :: p
-    real, intent(out) :: sigma, tau
 
-    real :: denom
+  subroutine kohonen_Normalize(x, xmean, xsdev)
+    real, dimension(:), intent(inout) :: x 
+    real, intent(out) :: xmean, xsdev
 
-    denom = 1.0 / (1.0 + p / pmax)
-    sigma = sigma0 * denom
-    tau = tau0 * denom
-
-  end subroutine Calc_sigma_tau
-
-
-  subroutine Normalize_weight()
-
-    real :: wmean, wsdev
     integer :: nmax
 
-    nmax = size( kohonen_weight )
-    wmean = sum( kohonen_weight(:, :, :, :) ) / nmax
-    wsdev = sqrt( (sum( kohonen_weight(:, :, :, :) ** 2 ) &
-      - nmax * wmean **2) / (nmax - 1.0) )
-    kohonen_weight = (kohonen_weight(:, :, :, :) - wmean) / wsdev
+    nmax = size( x(:) )
+    xmean = sum( x(:) ) / nmax
+    xsdev = sqrt( (sum( x(:) ** 2 )  - nmax * xmean **2) / (nmax - 1.0) )
+    x = (x(:) - xmean) / xsdev
 
-  end subroutine Normalize_weight
+  end subroutine kohonen_Normalize
 
 
-  subroutine kohonen_Init(kx, lx, ix, jx, tx, px, s0, t0, lhex)
+  subroutine kohonen_Init(kx, lx, ix, jx, tx, px, x, y, s0, t0, w0, lhex)
     integer, intent(in) :: kx, lx, ix, jx, tx, px
-    real, intent(in), optional :: s0, t0
+    real, intent(in), optional :: s0, t0, w0
+    real, intent(out), dimension(:,:), allocatable :: x
+    real, intent(out), dimension(:), allocatable :: y
     logical, intent(in), optional :: lhex
 
+    real :: w00 = 1.0e-5
+    real :: wmean, wsdev
+    real, dimension(:), allocatable :: w
     integer :: i, j, ii, jj
     logical :: lhexagonal = .true.
 
@@ -66,14 +58,23 @@ contains
         "imax =", imax, " jmax = ", jmax, &
         "tmax =", tmax, " pmax = ", pmax
     end if
-    allocate( x(imax, jmax), y(jmax), &
-      delta(imax, jmax, imax, jmax), &
+    allocate( delta(imax, jmax, imax, jmax), &
       kohonen_weight(kmax, lmax, imax, jmax), &
       kohonen_drms(imax, jmax))
+    allocate( x(imax, jmax), y(jmax), w(imax * jmax * kmax * lmax) )
 
     ! Initialize kohonen_weight with small random numbers
-    call random_number(kohonen_weight)
-    call Normalize_weight()
+    call random_number( w )
+    call kohonen_Normalize( w,  wmean, wsdev )
+    if ( present(w0) ) then
+      w00 = w0
+    end if
+    w(:) = w00 * w(:)
+    if ( kohonen_debug ) then
+      print *, "weight max =", maxval(w), " min = ", minval(w), &
+        " amplitude =", w00
+    end if
+    kohonen_weight(:, :, :, :) = reshape( w, (/kmax, lmax, imax, jmax/) )
 
     if (present(lhex)) then
       lhexagonal = lhex
@@ -131,15 +132,16 @@ contains
       end do
     end do
 
+    deallocate(w)
+
   end subroutine kohonen_Init
 
 
-  subroutine kohonen_Learn( z, d_p )
+  subroutine Elect_unit( z, d_p )
     real, dimension(:, :), intent(in) :: z
     real, intent(out) :: d_p
 
     integer :: i, j
-    real :: sigma, tau
 
     ! Elect unit
     do j = 1, jmax
@@ -149,23 +151,49 @@ contains
     end do
     d_p = minval(kohonen_drms)
     ns = minloc(kohonen_drms)
+    if ( kohonen_debug )  then
+      print *, "Learning step p =", p, "/", pmax
+      print *, "elected unit =", ns, " d_p = ", d_p
+    end if
 
-    ! Adjust kohonen_weight 
-    call Calc_sigma_tau( p, sigma, tau )
+  end subroutine Elect_unit
+
+  subroutine Adjust_weight_Ekert( z )
+    real, dimension(:, :), intent(in) :: z
+
+    integer :: i, j
+    real :: denom, sigma, tau, wmean, wsdev
+    real, dimension(:), allocatable :: w
+
+    denom = 1.0 / (1.0 + p / pmax)
+    sigma = sigma0 * denom
+    tau = tau0 * denom
     do j = 1, jmax
       do i = 1, imax
         if ( delta(i, j, ns(1), ns(2)) <= sigma ) then
-          kohonen_weight(i, j, :, :) = kohonen_weight(i, j, :, :) + &
+          kohonen_weight(:, :, i, j) = kohonen_weight(:, :, i, j) + &
             tau * (z(:, :) - kohonen_weight(:, :, i, j))
         end if
       end do
     end do
-    call Normalize_weight()
-
+    allocate( w(imax * jmax * kmax * lmax) )
+    w = pack( kohonen_weight, .true. )
+    call kohonen_Normalize( w,  wmean, wsdev )
+    kohonen_weight(:, :, :, :) = reshape( w, (/kmax, lmax, imax, jmax/) )
     if ( kohonen_debug )  then
-      print *, "Learning step p =", p, "/", pmax
-      print *, "elected unit =", ns
+      print *, "sigma =", sigma, " tau =", tau
     end if
+
+  end subroutine Adjust_weight_Ekert
+
+
+  subroutine kohonen_Learn( z, d_p )
+    real, dimension(:, :), intent(in) :: z
+    real, intent(out) :: d_p
+
+    call Elect_unit( z, d_p )
+
+    call Adjust_weight_Ekert( z )
 
     p = p + 1
 
