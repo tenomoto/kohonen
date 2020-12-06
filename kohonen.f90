@@ -4,10 +4,10 @@ module kohonen_module
 !  integer, parameter
 !    imax = 8, jmax = 8, kmax = 10, lmax = 10, tmax = 2192, pmax = 5.0 * tmax
 !  real, parameter :: sigma0 = 5.66, tau0 = 0.25
-  real, parameter :: tau00 = 0.25
+  integer, parameter :: kohonen_eckert = 0, kohonen_gaussian = 1
 
   integer, private :: imax, jmax, kmax, lmax, tmax, pmax
-  real, private :: sigma0, tau0
+  real, private :: sigma0, tau0, ptau, smin
   integer, private :: p = 1
   real, dimension(:, :, :, :), allocatable, private :: delta
   integer, dimension(2), private :: ns
@@ -36,13 +36,14 @@ contains
   end subroutine kohonen_Normalize
 
 
-  subroutine kohonen_Init(kx, lx, ix, jx, tx, px, x, y, s0, t0, w0, lhex)
+  subroutine kohonen_Init(kx, lx, ix, jx, tx, px, x, y, s0, t0, w0, tau, smn, lhex)
     integer, intent(in) :: kx, lx, ix, jx, tx, px
-    real, intent(in), optional :: s0, t0, w0
     real, intent(out), dimension(:,:), allocatable :: x
     real, intent(out), dimension(:), allocatable :: y
+    real, intent(in), optional :: s0, t0, w0, tau, smn
     logical, intent(in), optional :: lhex
 
+    real, parameter :: sfact = 0.2, tau00 = 0.25
     real :: w00 = 1.0e-5
     real :: wmean, wsdev
     real, dimension(:), allocatable :: w
@@ -109,7 +110,6 @@ contains
       sigma0 = s0
     else
       ! half the diagonal of the domain
-      print *, maxval(x), maxval(y)
       sigma0 = 0.5 * sqrt( maxval(x) ** 2 + maxval(y) ** 2)
     end if
     if (present(t0)) then
@@ -117,8 +117,18 @@ contains
     else
       tau0 = tau00
     end if
+    if ( present(tau) ) then
+      ptau = tau
+    else
+      ptau = real(pmax)
+    end if
+    if ( present(smn) ) then
+      smin = smn
+    else
+      smin = sfact * sigma0
+    end if
     if ( kohonen_debug ) then
-      print *, "sigma0 =", sigma0, " tau0 =", tau0
+      print *, "sigma0 =", sigma0, " tau0 =", tau0, " ptau =", ptau, " smin=", smin
     end if
 
     ! Calculate delta as Cartesian distance between units
@@ -146,7 +156,7 @@ contains
     ! Elect unit
     do j = 1, jmax
       do i = 1, imax
-        kohonen_drms(i, j) = sqrt( sum( (kohonen_weight(:, :, i, j) - z(:, :))**2 ) )
+        kohonen_drms(i, j) = sqrt( sum( (kohonen_weight(:, :, i, j) - z(:, :)) ** 2 ) )
       end do
     end do
     d_p = minval(kohonen_drms)
@@ -158,6 +168,7 @@ contains
 
   end subroutine Elect_unit
 
+
   subroutine Adjust_weight_Ekert( z )
     real, dimension(:, :), intent(in) :: z
 
@@ -165,7 +176,7 @@ contains
     real :: denom, sigma, tau, wmean, wsdev
     real, dimension(:), allocatable :: w
 
-    denom = 1.0 / (1.0 + p / pmax)
+    denom = 1.0 / (1.0 + p / ptau)
     sigma = sigma0 * denom
     tau = tau0 * denom
     do j = 1, jmax
@@ -187,13 +198,41 @@ contains
   end subroutine Adjust_weight_Ekert
 
 
-  subroutine kohonen_Learn( z, d_p )
+  subroutine Adjust_weight_Gaussian( z )
+    real, dimension(:, :), intent(in) :: z
+
+    integer :: i, j
+    real :: sigma
+    real, dimension(:, :), allocatable :: h
+
+    allocate(h(imax, jmax))
+    sigma = max( sigma0 * exp( -p / ptau), smin )
+    h(:, :) = exp( -0.5 * (delta(:, :, ns(1), ns(1)) / sigma) ** 2 )
+    do j = 1, jmax
+      do i = 1, imax
+        kohonen_weight(:, :, i, j) = kohonen_weight(:, :, i, j) + &
+            h(i, j) * (z(:, :) - kohonen_weight(:, :, i, j))
+      end do
+    end do
+    if ( kohonen_debug )  then
+      print *, "sigma =", sigma, " hmax=", maxval(h), " hmin=", minval(h)
+    end if
+    deallocate(h)
+
+  end subroutine Adjust_weight_Gaussian
+
+
+  subroutine kohonen_Learn( z, d_p, m )
     real, dimension(:, :), intent(in) :: z
     real, intent(out) :: d_p
+    integer :: m
 
     call Elect_unit( z, d_p )
-
-    call Adjust_weight_Ekert( z )
+    if ( m == kohonen_eckert ) then
+      call Adjust_weight_Ekert( z )
+    else
+      call Adjust_weight_Gaussian( z )
+    end if
 
     p = p + 1
 
