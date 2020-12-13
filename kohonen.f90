@@ -1,22 +1,19 @@
 module kohonen_module
   implicit none
 
-!  integer, parameter
-!    imax = 8, jmax = 8, kmax = 10, lmax = 10, tmax = 2192, pmax = 5.0 * tmax
-!  real, parameter :: sigma0 = 5.66, tau0 = 0.25
   integer, parameter :: kohonen_eckert = 0, kohonen_gaussian = 1
 
-  integer, private :: imax, jmax, kmax, lmax, tmax, pmax
+  integer, private :: imax, jmax, kmax, tmax, pmax
   real, private :: sigma0, tau0, ptau, smin
   integer, private :: p = 1
   real, dimension(:, :, :, :), allocatable, private :: delta
   integer, dimension(2), private :: ns
 
   real, dimension(:, :), allocatable, public :: kohonen_drms
-  real, dimension(:, :, :, :), allocatable, public :: kohonen_weight
+  real, dimension(:, :, :), allocatable, public :: kohonen_weight
   logical, public :: kohonen_debug = .false.
 
-  public :: kohonen_Init, kohonen_Normalize, kohonen_Learn
+  public :: kohonen_Init, kohonen_Normalize, kohonen_Learn, kohonen_Elect_unit
 
 
 contains
@@ -36,8 +33,8 @@ contains
   end subroutine kohonen_Normalize
 
 
-  subroutine kohonen_Init(kx, lx, ix, jx, tx, px, x, y, s0, t0, w0, tau, smn, lhex)
-    integer, intent(in) :: kx, lx, ix, jx, tx, px
+  subroutine kohonen_Init(kx, ix, jx, tx, px, x, y, s0, t0, w0, tau, smn, lhex)
+    integer, intent(in) :: kx, ix, jx, tx, px
     real, intent(out), dimension(:,:), allocatable :: x
     real, intent(out), dimension(:), allocatable :: y
     real, intent(in), optional :: s0, t0, w0, tau, smn
@@ -51,18 +48,16 @@ contains
     logical :: lhexagonal = .true.
 
     ! Initialize parameters and allocate arrays
-    kmax = kx; lmax = lx
-    imax = ix; jmax = jx
+    kmax = kx; imax = ix; jmax = jx
     tmax = tx; pmax = px
     if ( kohonen_debug ) then
-      print *, "kmax =", kmax, "lmax =", lmax, &
-        "imax =", imax, " jmax = ", jmax, &
+      print *, "kmax =", kmax, "imax =", imax, " jmax = ", jmax, &
         "tmax =", tmax, " pmax = ", pmax
     end if
     allocate( delta(imax, jmax, imax, jmax), &
-      kohonen_weight(kmax, lmax, imax, jmax), &
+      kohonen_weight(kmax, imax, jmax), &
       kohonen_drms(imax, jmax))
-    allocate( x(imax, jmax), y(jmax), w(imax * jmax * kmax * lmax) )
+    allocate( x(imax, jmax), y(jmax), w(imax * jmax * kmax) )
 
     ! Initialize kohonen_weight with small random numbers
     call random_number( w )
@@ -75,7 +70,7 @@ contains
       print *, "weight max =", maxval(w), " min = ", minval(w), &
         " amplitude =", w00
     end if
-    kohonen_weight(:, :, :, :) = reshape( w, (/kmax, lmax, imax, jmax/) )
+    kohonen_weight(:, :, :) = reshape( w, (/kmax, imax, jmax/) )
 
     if (present(lhex)) then
       lhexagonal = lhex
@@ -147,30 +142,30 @@ contains
   end subroutine kohonen_Init
 
 
-  subroutine Elect_unit( z, d_p )
-    real, dimension(:, :), intent(in) :: z
+  subroutine kohonen_Elect_unit( z, u, d_p )
+    real, dimension(:), intent(in) :: z
+    integer, dimension(2), intent(out) :: u 
     real, intent(out) :: d_p
 
     integer :: i, j
 
-    ! Elect unit
     do j = 1, jmax
       do i = 1, imax
-        kohonen_drms(i, j) = sqrt( sum( (kohonen_weight(:, :, i, j) - z(:, :)) ** 2 ) )
+        kohonen_drms(i, j) = sqrt( sum( (kohonen_weight(:, i, j) - z(:)) ** 2 ) )
       end do
     end do
     d_p = minval(kohonen_drms)
-    ns = minloc(kohonen_drms)
+    u = minloc(kohonen_drms)
     if ( kohonen_debug )  then
       print *, "Learning step p =", p, "/", pmax
-      print *, "elected unit =", ns, " d_p = ", d_p
+      print *, "elected unit =", u, " d_p = ", d_p
     end if
 
-  end subroutine Elect_unit
+  end subroutine kohonen_Elect_unit
 
 
   subroutine Adjust_weight_Ekert( z )
-    real, dimension(:, :), intent(in) :: z
+    real, dimension(:), intent(in) :: z
 
     integer :: i, j
     real :: denom, sigma, tau, wmean, wsdev
@@ -182,15 +177,15 @@ contains
     do j = 1, jmax
       do i = 1, imax
         if ( delta(i, j, ns(1), ns(2)) <= sigma ) then
-          kohonen_weight(:, :, i, j) = kohonen_weight(:, :, i, j) + &
-            tau * (z(:, :) - kohonen_weight(:, :, i, j))
+          kohonen_weight(:, i, j) = kohonen_weight(:, i, j) + &
+            tau * (z(:) - kohonen_weight(:, i, j))
         end if
       end do
     end do
-    allocate( w(imax * jmax * kmax * lmax) )
+    allocate( w(imax * jmax * kmax) )
     w = pack( kohonen_weight, .true. )
     call kohonen_Normalize( w,  wmean, wsdev )
-    kohonen_weight(:, :, :, :) = reshape( w, (/kmax, lmax, imax, jmax/) )
+    kohonen_weight(:, :, :) = reshape( w, (/kmax, imax, jmax/) )
     if ( kohonen_debug )  then
       print *, "sigma =", sigma, " tau =", tau
     end if
@@ -199,7 +194,7 @@ contains
 
 
   subroutine Adjust_weight_Gaussian( z )
-    real, dimension(:, :), intent(in) :: z
+    real, dimension(:), intent(in) :: z
 
     integer :: i, j
     real :: sigma
@@ -210,8 +205,8 @@ contains
     h(:, :) = exp( -0.5 * (delta(:, :, ns(1), ns(1)) / sigma) ** 2 )
     do j = 1, jmax
       do i = 1, imax
-        kohonen_weight(:, :, i, j) = kohonen_weight(:, :, i, j) + &
-            h(i, j) * (z(:, :) - kohonen_weight(:, :, i, j))
+        kohonen_weight(:, i, j) = kohonen_weight(:, i, j) + &
+            h(i, j) * (z(:) - kohonen_weight(:, i, j))
       end do
     end do
     if ( kohonen_debug )  then
@@ -223,11 +218,11 @@ contains
 
 
   subroutine kohonen_Learn( z, d_p, m )
-    real, dimension(:, :), intent(in) :: z
+    real, dimension(:), intent(in) :: z
     real, intent(out) :: d_p
     integer :: m
 
-    call Elect_unit( z, d_p )
+    call kohonen_Elect_unit( z, ns, d_p )
     if ( m == kohonen_eckert ) then
       call Adjust_weight_Ekert( z )
     else
