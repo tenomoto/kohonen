@@ -33,17 +33,16 @@ contains
   end subroutine kohonen_Normalize
 
 
-  subroutine kohonen_Init(kx, ix, jx, tx, px, x, y, s0, t0, w0, tau, smn, lhex)
+  subroutine kohonen_Init(kx, ix, jx, tx, px, s0, t0, w0, tau, smn, lhex)
     integer, intent(in) :: kx, ix, jx, tx, px
-    real, intent(out), dimension(:,:), allocatable :: x
-    real, intent(out), dimension(:), allocatable :: y
     real, intent(in), optional :: s0, t0, w0, tau, smn
     logical, intent(in), optional :: lhex
 
     real, parameter :: sfact = 0.2, tau00 = 0.25
     real :: w00 = 1.0e-5
     real :: wmean, wsdev
-    real, dimension(:), allocatable :: w
+    real, dimension(:,:), allocatable :: x
+    real, dimension(:), allocatable :: w, y
     integer :: i, j, ii, jj
     logical :: lhexagonal = .true.
 
@@ -183,9 +182,9 @@ contains
       end do
     end do
     allocate( w(imax * jmax * kmax) )
-    w = pack( kohonen_weight, .true. )
-    call kohonen_Normalize( w,  wmean, wsdev )
-    kohonen_weight(:, :, :) = reshape( w, (/kmax, imax, jmax/) )
+!    w = pack( kohonen_weight, .true. )
+!    call kohonen_Normalize( w,  wmean, wsdev )
+!    kohonen_weight(:, :, :) = reshape( w, (/kmax, imax, jmax/) )
     if ( kohonen_debug )  then
       print *, "sigma =", sigma, " tau =", tau
     end if
