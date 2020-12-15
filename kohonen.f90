@@ -19,30 +19,28 @@ module kohonen_module
 contains
   
 
-  subroutine kohonen_Normalize(x, xmean, xsdev)
+  subroutine kohonen_Normalize(x, l2)
     real, dimension(:), intent(inout) :: x 
-    real, intent(out) :: xmean, xsdev
+    real, intent(out) :: l2
 
     integer :: nmax
 
     nmax = size( x(:) )
-    xmean = sum( x(:) ) / nmax
-    xsdev = sqrt( (sum( x(:) ** 2 )  - nmax * xmean **2) / (nmax - 1.0) )
-    x = (x(:) - xmean) / xsdev
+    l2 = sqrt( sum( x(:) ** 2 ) )
+    x = x(:) / l2
 
   end subroutine kohonen_Normalize
 
 
-  subroutine kohonen_Init(kx, ix, jx, tx, px, s0, t0, w0, tau, smn, lhex)
+  subroutine kohonen_Init(kx, ix, jx, tx, px, s0, t0, tau, smn, lhex)
     integer, intent(in) :: kx, ix, jx, tx, px
-    real, intent(in), optional :: s0, t0, w0, tau, smn
+    real, intent(in), optional :: s0, t0, tau, smn
     logical, intent(in), optional :: lhex
 
     real, parameter :: sfact = 0.2, tau00 = 0.25
-    real :: w00 = 1.0e-5
-    real :: wmean, wsdev
+    real :: wl2
     real, dimension(:,:), allocatable :: x
-    real, dimension(:), allocatable :: w, y
+    real, dimension(:), allocatable :: y
     integer :: i, j, ii, jj
     logical :: lhexagonal = .true.
 
@@ -56,20 +54,15 @@ contains
     allocate( delta(imax, jmax, imax, jmax), &
       kohonen_weight(kmax, imax, jmax), &
       kohonen_drms(imax, jmax))
-    allocate( x(imax, jmax), y(jmax), w(imax * jmax * kmax) )
+    allocate( x(imax, jmax), y(jmax) )
 
-    ! Initialize kohonen_weight with small random numbers
-    call random_number( w )
-    call kohonen_Normalize( w,  wmean, wsdev )
-    if ( present(w0) ) then
-      w00 = w0
-    end if
-    w(:) = w00 * w(:)
-    if ( kohonen_debug ) then
-      print *, "weight max =", maxval(w), " min = ", minval(w), &
-        " amplitude =", w00
-    end if
-    kohonen_weight(:, :, :) = reshape( w, (/kmax, imax, jmax/) )
+    ! Initialize kohonen_weight with random numbers
+    call random_number( kohonen_weight(:, :, :) )
+    do j = 1, jmax
+      do i = 1, imax
+        call kohonen_Normalize( kohonen_weight(:, i, j), wl2 )
+      end do
+    end do
 
     if (present(lhex)) then
       lhexagonal = lhex
@@ -136,8 +129,6 @@ contains
       end do
     end do
 
-    deallocate(w)
-
   end subroutine kohonen_Init
 
 
@@ -166,9 +157,8 @@ contains
   subroutine Adjust_weight_Ekert( z )
     real, dimension(:), intent(in) :: z
 
-    integer :: i, j
-    real :: denom, sigma, tau, wmean, wsdev
-    real, dimension(:), allocatable :: w
+    integer :: i, j, k
+    real :: denom, sigma, tau, wl2
 
     denom = 1.0 / (1.0 + p / ptau)
     sigma = sigma0 * denom
@@ -181,10 +171,11 @@ contains
         end if
       end do
     end do
-    allocate( w(imax * jmax * kmax) )
-!    w = pack( kohonen_weight, .true. )
-!    call kohonen_Normalize( w,  wmean, wsdev )
-!    kohonen_weight(:, :, :) = reshape( w, (/kmax, imax, jmax/) )
+!    do j = 1, jmax
+!      do i = 1, imax
+!        call kohonen_Normalize( kohonen_weight(:, i, j), wl2 )
+!      end do
+!    end do
     if ( kohonen_debug )  then
       print *, "sigma =", sigma, " tau =", tau
     end if
@@ -196,7 +187,7 @@ contains
     real, dimension(:), intent(in) :: z
 
     integer :: i, j
-    real :: sigma
+    real :: sigma, wl2
     real, dimension(:, :), allocatable :: h
 
     allocate(h(imax, jmax))
@@ -208,6 +199,11 @@ contains
             h(i, j) * (z(:) - kohonen_weight(:, i, j))
       end do
     end do
+!    do j = 1, jmax
+!      do i = 1, imax
+!        call kohonen_Normalize( kohonen_weight(:, i, j), wl2 )
+!      end do
+!    end do
     if ( kohonen_debug )  then
       print *, "sigma =", sigma, " hmax=", maxval(h), " hmin=", minval(h)
     end if
